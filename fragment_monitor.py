@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Fragment Gifts Auction Monitor Bot
+Fragment Gifts Auction Monitor Bot - Railway Deployment
 يراقب مزادات الهدايا على Fragment ويرسل إشعارات فورية عند ظهور هدايا جديدة
 """
 
@@ -8,6 +8,7 @@ import asyncio
 import logging
 import json
 import hashlib
+import os
 from datetime import datetime
 from typing import Optional
 
@@ -17,12 +18,18 @@ from telegram import Bot
 from telegram.constants import ParseMode
 
 # ─────────────────────────────────────────────
-#  إعدادات البوت
+#  إعدادات البوت (من متغيرات البيئة)
 # ─────────────────────────────────────────────
-BOT_TOKEN   = "8753322256:AAHO8fNNcSyCxUg_WYe1y4ezRJ02Yz0GUSM"
-ADMIN_ID    = 7471045862
-CHECK_EVERY = 5          # ثواني بين كل فحص
+BOT_TOKEN   = os.getenv("BOT_TOKEN", "8753322256:AAHO8fNNcSyCxUg_WYe1y4ezRJ02Yz0GUSM")
+ADMIN_ID    = int(os.getenv("ADMIN_ID", "7471045862"))
+CHECK_EVERY = int(os.getenv("CHECK_EVERY", "5"))  # ثواني بين كل فحص
 FRAGMENT_URL = "https://fragment.com/gifts?sort=listed&filter=auction"
+
+# تحقق من المتغيرات المطلوبة
+if not BOT_TOKEN or BOT_TOKEN == "8753322256:AAHO8fNNcSyCxUg_WYe1y4ezRJ02Yz0GUSM":
+    raise ValueError("❌ BOT_TOKEN غير مضبوط! تأكد من إضافته في متغيرات البيئة Railway")
+if ADMIN_ID == 7471045862:
+    raise ValueError("❌ ADMIN_ID غير مضبوط! تأكد من إضافته في متغيرات البيئة Railway")
 
 # ─────────────────────────────────────────────
 #  إعداد اللوق
@@ -226,8 +233,11 @@ async def monitor():
     """الحلقة الرئيسية لمراقبة الهدايا"""
     try:
         bot = Bot(token=BOT_TOKEN)
+        # اختبر الاتصال بالبوت
+        await bot.get_me()
+        log.info("✅ تم الاتصال بـ Telegram بنجاح")
     except Exception as e:
-        log.error(f"❌ فشل إنشاء البوت: {e}")
+        log.error(f"❌ فشل الاتصال بـ Telegram: {e}")
         return
 
     seen_ids: set = set()
@@ -238,7 +248,7 @@ async def monitor():
         await bot.send_message(
             chat_id=ADMIN_ID,
             text=(
-                "✅ <b>بوت Fragment بدأ يشتغل</b>\n"
+                "✅ <b>بوت Fragment بدأ يشتغل على Railway!</b>\n"
                 f"🔄 يفحص كل <b>{CHECK_EVERY} ثواني</b>\n"
                 f"🔗 {FRAGMENT_URL}"
             ),
@@ -248,7 +258,7 @@ async def monitor():
     except Exception as e:
         log.error(f"❌ فشل إرسال إشعار البدء: {e}")
 
-    async with httpx.AsyncClient(follow_redirects=True) as client:
+    async with httpx.AsyncClient(follow_redirects=True, timeout=20) as client:
         while True:
             try:
                 gifts = await fetch_gifts(client)
@@ -277,4 +287,9 @@ async def monitor():
 #  نقطة الدخول
 # ─────────────────────────────────────────────
 if __name__ == "__main__":
-    asyncio.run(monitor())
+    try:
+        asyncio.run(monitor())
+    except KeyboardInterrupt:
+        log.info("تم إيقاف البوت")
+    except Exception as e:
+        log.error(f"❌ خطأ حرج: {e}")
