@@ -8,8 +8,8 @@ import asyncio
 import logging
 import json
 import hashlib
-import time
 from datetime import datetime
+from typing import Optional
 
 import httpx
 from bs4 import BeautifulSoup
@@ -50,10 +50,10 @@ HEADERS = {
     "DNT": "1",
 }
 
-# ��────────────────────────────────────────────
+# ─────────────────────────────────────────────
 #  جلب البيانات من Fragment
 # ─────────────────────────────────────────────
-async def fetch_gifts(client: httpx.AsyncClient) -> list[dict]:
+async def fetch_gifts(client: httpx.AsyncClient) -> list:
     """
     يجلب قائمة الهدايا من Fragment (مرتبة بـ recently listed).
     يرجع list من dicts بها: id, name, price, link, listed_at
@@ -108,7 +108,7 @@ async def fetch_gifts(client: httpx.AsyncClient) -> list[dict]:
     return gifts
 
 
-def _parse_html_item(item) -> dict | None:
+def _parse_html_item(item) -> Optional[dict]:
     """يحلّل عنصر HTML واحد ويرجع dict"""
     try:
         # اسم الهدية
@@ -179,46 +179,74 @@ def _parse_json_gift(row: dict) -> dict:
     }
 
 
+def _escape_html(text: str) -> str:
+    """تجنب XSS بـ escape HTML characters"""
+    return (text
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&#39;")
+    )
+
+
 # ─────────────────────────────────────────────
 #  إرسال إشعار Telegram
 # ─────────────────────────────────────────────
 async def notify(bot: Bot, gift: dict) -> None:
+    """يرسل إشعار Telegram عند ظهور هدية جديدة"""
     listed_at = gift.get("listed_at") or datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    escaped_name = _escape_html(gift["name"])
+    escaped_price = _escape_html(gift["price"])
+    escaped_link = _escape_html(gift["link"])
+    
     msg = (
         "🎁 <b>هدية جديدة على Fragment!</b>\n\n"
-        f"📌 <b>الاسم:</b> {gift['name']}\n"
-        f"💰 <b>السعر:</b> {gift['price']} TON\n"
+        f"📌 <b>الاسم:</b> {escaped_name}\n"
+        f"💰 <b>السعر:</b> {escaped_price} TON\n"
         f"🕐 <b>وقت الإدراج:</b> {listed_at}\n"
-        f"🔗 <a href='{gift['link']}'>فتح المزاد</a>"
+        f"🔗 <a href='{escaped_link}'>فتح المزاد</a>"
     )
-    await bot.send_message(
-        chat_id=ADMIN_ID,
-        text=msg,
-        parse_mode=ParseMode.HTML,
-        disable_web_page_preview=False,
-    )
-    log.info(f"✅ أُرسل إشعار: {gift['name']} — {gift['price']} TON")
+    try:
+        await bot.send_message(
+            chat_id=ADMIN_ID,
+            text=msg,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=False,
+        )
+        log.info(f"✅ أُرسل إشعار: {gift['name']} — {gift['price']} TON")
+    except Exception as e:
+        log.error(f"❌ فشل إرسال الإشعار: {e}")
 
 
 # ─────────────────────────────────────────────
 #  الحلقة الرئيسية
 # ─────────────────────────────────────────────
 async def monitor():
-    bot = Bot(token=BOT_TOKEN)
-    seen_ids: set[str] = set()
+    """الحلقة الرئيسية لمراقبة الهدايا"""
+    try:
+        bot = Bot(token=BOT_TOKEN)
+    except Exception as e:
+        log.error(f"❌ فشل إنشاء البوت: {e}")
+        return
+
+    seen_ids: set = set()
     first_run = True
 
     # إشعار بدء التشغيل
-    await bot.send_message(
-        chat_id=ADMIN_ID,
-        text=(
-            "✅ <b>بوت Fragment بدأ يشتغل</b>\n"
-            f"🔄 يفحص كل <b>{CHECK_EVERY} ثواني</b>\n"
-            f"🔗 {FRAGMENT_URL}"
-        ),
-        parse_mode=ParseMode.HTML,
-    )
-    log.info("البوت بدأ — يراقب مزادات الهدايا على Fragment")
+    try:
+        await bot.send_message(
+            chat_id=ADMIN_ID,
+            text=(
+                "✅ <b>بوت Fragment بدأ يشتغل</b>\n"
+                f"🔄 يفحص كل <b>{CHECK_EVERY} ثواني</b>\n"
+                f"🔗 {FRAGMENT_URL}"
+            ),
+            parse_mode=ParseMode.HTML,
+        )
+        log.info("البوت بدأ — يراقب مزادات الهدايا على Fragment")
+    except Exception as e:
+        log.error(f"❌ فشل إرسال إشعار البدء: {e}")
 
     async with httpx.AsyncClient(follow_redirects=True) as client:
         while True:
