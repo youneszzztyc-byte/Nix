@@ -1,0 +1,2 @@
+[deploy]
+startCommand = "python fragment_monitor.py"
